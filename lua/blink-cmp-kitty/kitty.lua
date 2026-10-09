@@ -26,9 +26,22 @@ function M.executable()
 end
 
 --- Whether there is a kitty to ask: inside one, or with its socket known
+---
+--- The variables of a kitty outlive it in shells started from it (a
+--- multiplexer session kept running): a socket on disk is checked to still
+--- be there. An abstract socket (`unix:@name`) or TCP has nothing to check.
 ---@return boolean
 function M.available()
-	if vim.env.KITTY_WINDOW_ID == nil and vim.env.KITTY_LISTEN_ON == nil then
+	local listen_on = vim.env.KITTY_LISTEN_ON
+	if listen_on and listen_on ~= "" then
+		local path = listen_on:match("^unix:(.+)$")
+		if path and path:sub(1, 1) ~= "@" then
+			local stat = vim.uv.fs_stat(path)
+			if not stat or stat.type ~= "socket" then
+				return false
+			end
+		end
+	elseif vim.env.KITTY_WINDOW_ID == nil then
 		return false
 	end
 	return M.executable() ~= nil
@@ -55,10 +68,14 @@ end
 ---@return vim.SystemObj?
 function M.run(argv, on_done)
 	local max = config.options.max_bytes
-	local chunks, size, cut = {}, 0, false
+	local chunks, size, cut, answered = {}, 0, false, false
 	---@type vim.SystemObj?
 	local process
 	local function finish(...)
+		if answered then
+			return
+		end
+		answered = true
 		local args = vim.F.pack_len(...)
 		vim.schedule(function()
 			on_done(vim.F.unpack_len(args))
@@ -103,6 +120,17 @@ function M.run(argv, on_done)
 		return nil
 	end
 	process = started
+	-- The exit is only reported once the output closes, and something the
+	-- command started can hold it open past the deadline: give up on it then
+	local guard = assert(vim.uv.new_timer())
+	guard:start(config.options.timeout + 1000, 0, function()
+		guard:close()
+		if not answered then
+			pcall(started.kill, started, "sigkill")
+			log.warn("%s: no answer", table.concat(argv, " "))
+			finish(nil, ("no answer within %d ms"):format(config.options.timeout))
+		end
+	end)
 	return process
 end
 

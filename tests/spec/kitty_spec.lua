@@ -47,6 +47,30 @@ describe("kitty", function()
 		assert.is_false(kitty.available())
 	end)
 
+	it("is not available through a socket that is gone", function()
+		config.set({ executable = h.script(dir, "kitten", { "true" }) })
+		vim.env.KITTY_LISTEN_ON = "unix:" .. dir .. "/gone.sock"
+		assert.is_false(kitty.available())
+		local server = vim.uv.new_pipe(false)
+		assert(server:bind(dir .. "/live.sock"))
+		vim.env.KITTY_LISTEN_ON = "unix:" .. dir .. "/live.sock"
+		assert.is_true(kitty.available())
+		server:close()
+		vim.env.KITTY_LISTEN_ON = "unix:@kitty"
+		assert.is_true(kitty.available())
+		vim.env.KITTY_LISTEN_ON = "tcp:localhost:12345"
+		assert.is_true(kitty.available())
+	end)
+
+	it("answers at the deadline though a child keeps the output open", function()
+		config.set({ timeout = 100 })
+		local started = vim.uv.hrtime()
+		local out, err = run({ h.script(dir, "holder", { "sleep 10 &", "sleep 10" }) })
+		assert.is_nil(out)
+		assert.equal("no answer within 100 ms", err)
+		assert.is_true((vim.uv.hrtime() - started) / 1e6 < 3000)
+	end)
+
 	it("keeps the windows the options include", function()
 		config.set({
 			include_tab = function(tab)
