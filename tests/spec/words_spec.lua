@@ -1,0 +1,41 @@
+local words = require("blink-cmp-kitty.words")
+
+describe("words", function()
+	local function kinds(text)
+		return words.extract(text)
+	end
+
+	it("finds words of three letters and more, as text", function()
+		local found = kinds("an apple of 42 and abc123")
+		assert.equal("text", found.apple)
+		assert.equal("text", found.abc123)
+		assert.is_nil(found.an)
+		assert.is_nil(found.of)
+	end)
+
+	it("keeps kebab-case, snake_case and dot.case whole", function()
+		local found = kinds("blink-cmp-kitty my_var vim.fn.expand")
+		assert.equal("text", found["blink-cmp-kitty"])
+		assert.equal("text", found.my_var)
+		assert.equal("text", found["vim.fn.expand"])
+	end)
+
+	it("takes emails, URLs and options as values", function()
+		local found = kinds("mail me@dynamotn.dev, see https://example.com/a?b=1. Run --dry-run")
+		assert.equal("value", found["me@dynamotn.dev"])
+		assert.equal("value", found["https://example.com/a?b=1"])
+		assert.equal("value", found["--dry-run"])
+	end)
+
+	it("reads an option only after two dashes", function()
+		local found = kinds("a-b x--y --ok")
+		assert.is_nil(found["-b"])
+		assert.equal("value", found["--ok"])
+	end)
+
+	it("adds to the words already found", function()
+		local found = words.extract("first", { kept = "text" })
+		assert.equal("text", found.kept)
+		assert.equal("text", found.first)
+	end)
+end)
